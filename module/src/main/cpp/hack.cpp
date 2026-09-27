@@ -17,12 +17,44 @@
 #include <linux/unistd.h>
 #include <array>
 
+static bool HasRequiredIl2CppExports(void *handle) {
+    // il2cpp_dump currently resolves APIs by name with xdl_sym().  Do a small
+    // fail-fast probe before entering il2cpp_api_init()/il2cpp_dump() so games
+    // with stripped/hidden IL2CPP exports do not crash on null function calls.
+    static const char *required[] = {
+            "il2cpp_domain_get",
+            "il2cpp_domain_get_assemblies",
+            "il2cpp_assembly_get_image",
+            "il2cpp_image_get_name",
+            "il2cpp_thread_attach",
+            "il2cpp_is_vm_thread",
+    };
+
+    bool ok = true;
+    for (const char *name: required) {
+        if (!xdl_sym(handle, name, nullptr)) {
+            LOGW("required api not exported: %s", name);
+            ok = false;
+        }
+    }
+
+    if (!ok) {
+        LOGE("IL2CPP exports are stripped/hidden or unsupported; skip runtime dump safely");
+    }
+    return ok;
+}
+
 void hack_start(const char *game_data_dir) {
     bool load = false;
     for (int i = 0; i < 10; i++) {
         void *handle = xdl_open("libil2cpp.so", 0);
         if (handle) {
             load = true;
+            LOGI("libil2cpp handle found: %p", handle);
+            if (!HasRequiredIl2CppExports(handle)) {
+                LOGE("dump aborted before API init to avoid null-pointer crash");
+                return;
+            }
             il2cpp_api_init(handle);
             il2cpp_dump(game_data_dir);
             break;
